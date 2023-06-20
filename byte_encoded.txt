@@ -1,0 +1,1 @@
+{"specversion": "1.0", "id": "b94e5e3c-3a81-4bb4-974e-4381bddea33e", "source": "https://example.com/event-producer", "type": "com.example.sampletype1", "dataschema": "http://myrepository.com/data-schema", "time": "2023-05-22T02:51:22.774646+00:00", "data": {"message": "value"}, "content-type": "application/cloudevents-bulk+json"}

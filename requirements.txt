@@ -1,0 +1,2 @@
+boto3
+cloudevents==1.9.0

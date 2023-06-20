@@ -11,10 +11,15 @@ class Event(CloudEvent):
 
     @staticmethod
     def deserialize(response:requests.Response)->Event:
+        event = json.loads(response.json())
+        print(type(event))
+        headers = {k:v for k,v in event.items() if k != "data"}
+        data = event.get("data")
+
         return(from_http(
             event_type=CloudEvent,
-            headers=response.headers,
-            data=response.json()))
+            headers=headers,
+            data=json.dumps(data)))
     
     @staticmethod
     def serialize(headers:dict, data:dict)->Event:
@@ -23,10 +28,11 @@ class Event(CloudEvent):
         )
     
     @staticmethod
-    def transmit(event:Event):
-        headers, data = to_binary(event)
+    def transmit(event:Event, url:str="http://localhost:5000"):
+        headers, data = to_structured(event)
+        print(f"Int Headers: {headers}")
         response = requests.post(
-            url="http://localhost:5000/",
+            url=url,
             data=data,
             headers=headers
         )

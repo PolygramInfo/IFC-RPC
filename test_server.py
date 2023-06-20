@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from cloudevents.http import CloudEvent
 from cloudevents.http import from_http
-from cloudevents.conversion import to_json
+from cloudevents.conversion import to_json, to_binary
 import json
 
 from sdk import schema_builder
@@ -19,15 +19,17 @@ app = FastAPI(
 
 @app.post("/")
 async def home(request:Request):
-    headers = request.headers
-    data = await request.body()
-    data = json.loads(data.decode())
-    print(headers)
-    print(data)
+    event = from_http(
+        headers=request.headers,
+        data= await request.body()
+    )
+
+    print(event.get_attributes())
+    print(event.get_data())
 
     constructor = schema_builder.factory(known_schema)
 
-    instance = constructor(**data)
+    instance = constructor(**event.get_data())
 
     print(instance.__dict__)
 
@@ -40,7 +42,16 @@ async def home(request:Request):
     "dataschema": "http://myrepository.com/data-schema"
     }
     
-    return(to_json(CloudEvent(attributes=attributes, data=data)))
+    response_event = CloudEvent(
+        attributes=attributes,
+        data=event.get_data()
+    )
+
+    headers, response = to_binary()
+
+    return(
+
+    )
 
 if __name__ == "__main__":
     app.run(port=5000)
