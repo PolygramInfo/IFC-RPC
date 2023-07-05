@@ -138,6 +138,11 @@ def handler(event, context):
         
         response.body["message"] = "Event received."
         response.body["resource_id"] = uuid.uuid4().hex
+        response.statusCode = 200
+    except Exception as e:
+        response.body["message"] = f"Error: {e}"
+        response.statusCode = 500
+        return response.__dict__
 
 
 

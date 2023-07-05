@@ -1,12 +1,49 @@
-import requests
-import json
+import unittest
+from unittest.mock import patch, MagicMock
+from ..event_router import route_event, send_message_to_sqs, EventTypes
+import uuid
 
-event = {"transaction": {"source_event_id": "983db327-aa4e-460b-a967-ed8586823e48", "transaction_id": None, "resource_id": "1672fa92d0e644bbafcab19ed30657cb", "retry_after": "2023-05-23 03:34:22.635108"}, "event": {"specversion": "1.0", "id": "983db327-aa4e-460b-a967-ed8586823e48", "source": "https://example.com/event-producer", "type": "com.example.sampletype1", "dataschema": "http://myrepository.com/data-schema", "time": "2023-05-23T03:33:52.297130+00:00", "content-type": "application/cloudevents-bulk+json", "userhash": "e00d019e888653062eb6d5fac8cbbd8d", "token": "7b8d43db43b94746a7dc62b3e161d323"}}
+class TestEventRouter(unittest.TestCase):
+    def setUp(self):
+        self.event = { 
+            "type": "test",
+            "data": {
+                "test": "data"
+            }
+        }
 
-response = requests.post(
-    url="http://localhost:9000/2015-03-31/functions/function/invocations",
-    headers={},
-    data=json.dumps(event)
-)
+        self.resource_id = uuid.uuid4().hex
+        self.transaction_id = uuid.uuid4().hex
 
-response = 
+    def test_route_event_no_event(self):
+        self.assertEqual(route_event(), 500)
+
+    def test_route_event_no_resource_id(self):
+        self.assertEqual(route_event(event=self.event), 500)
+
+    def test_route_event_invalid_event_type(self):
+        self.event["type"] = "invalid"
+        self.assertEqual(route_event(event=self.event, resource_id=self.resource_id), 400)
+
+    @patch("services.collector.router.event_router.send_message_to_sqs")
+    def test_route_event_valid_event_type(self, mock_send_message_to_sqs):
+        self.event["type"] = EventTypes.sampletype1.value
+        self.assertEqual(route_event(event=self.event, resource_id=self.resource_id), 200)
+
+    @patch("services.collector.router.event_router.boto3")
+    def test_send_message_to_sqs(self, mock_boto3):
+        mock_boto3.Session.return_value.client.return_value.send_message.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        self.assertEqual(send_message_to_sqs(uri=EventTypes.sampletype1.value, event=self.event, resource_id=self.resource_id, transaction_id=self.transaction_id), 200)
+
+    @patch("services.collector.router.event_router.boto3")
+    def test_send_message_to_sqs_error(self, mock_boto3):
+        mock_boto3.Session.return_value.client.return_value.send_message.return_value = {"Error": "Error"}
+        self.assertEqual(send_message_to_sqs(uri=EventTypes.sampletype1.value, event=self.event, resource_id=self.resource_id, transaction_id=self.transaction_id), 500)
+
+    @patch("services.collector.router.event_router.boto3")
+    def test_send_message_to_sqs_http_error(self, mock_boto3):
+        mock_boto3.Session.return_value.client.return_value.send_message.return_value = {"ResponseMetadata": {"HTTPStatusCode": 400}}
+        self.assertEqual(send_message_to_sqs(uri=EventTypes.sampletype1.value, event=self.event, resource_id=self.resource_id, transaction_id=self.transaction_id), 500)
+
+if __name__ == "__main__":
+    unittest.main()
