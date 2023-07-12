@@ -10,8 +10,11 @@ from http import HTTPStatus
 
 import boto3
 from botocore import exceptions
-from cloudevents.conversion import to_binary, to_structured
+from cloudevents.conversion import to_binary, to_structured, to_json
 from cloudevents.http import CloudEvent
+
+import event_authenticator
+import event_validator
 
 """
 The ambassador is the "frontdoor" to the client. 
@@ -60,18 +63,14 @@ class Ambassador:
         Initialize the ambassador
         """
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)
 
         stream_handler = logging.StreamHandler(stream=sys.stdout)
         stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
         self.logger.addHandler(stream_handler)
 
         try:
-            self.session = boto3.Session(
-                aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-                aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
-                region_name=os.environ["AWS_REGION"]
-            )
+            self.session = boto3.Session()
         except exceptions.NoCredentialsError:
             self.logger.error("No AWS Credentials found. Logging to CloudWatch will not be available.")
             raise exceptions.NoCredentialsError("No AWS Credentials found. Logging to CloudWatch will not be available.")
@@ -83,8 +82,7 @@ class Ambassador:
         """
         Authenticate the client
         """
-        import authenticator
-        return authenticator.authorize_user(user_hash, token)
+        return event_authenticator.authorize_user(user_hash, token)
     
     def validate_event(self, event):
         """
@@ -92,75 +90,97 @@ class Ambassador:
         does not check the data of the event, only the event is
         a valid event type and has the required fields.
         """
-        import event_validator
         return event_validator.validate_event(event)
     
     def generate_resource(self, event)->dict:
         """
         Generate a new resource
         """
-        resource_uri = os.environ["BASE_RESOURCE_URI"]
         resource_id = uuid.uuid4().hex
 
         return {
-            "resource_uri": resource_uri + resource_id,
             "resource_id": resource_id
         }
 
-    def register_resource(self, resource:dict)->dict:
+    def register_resource(self, resource:dict)->bool:
         """
         Register the new resource
         """
-        table = self.dynamodb.Table(os.environ["RESOURCE_TABLE_NAME"])
+        table = self.dynamodb.Table("Resources")
 
         response = table.put_item(
             Item={
                 "resource_id": resource["resource_id"],
+                "updated_at": datetime.utcnow().isoformat(),
                 "created_on": datetime.utcnow().isoformat(),
-                "expires_after": (datetime.utcnow() + 
+                "expires_after": int((datetime.utcnow() + 
                                   timedelta(
-                                    hours=int(os.environ["RESOURCE_LIFESPAN"]))).isoformat()
+                                    hours=6))
+                                    .timestamp()),
+                "published": False,
             },
-            ConditionExpression="attribute_not_exists(resource_id)",
-            ReturnValues="ALL_NEW"
+            ConditionExpression="attribute_not_exists(resource_id)"
         )
 
         #TODO do something here to log the resource.
 
-        return response["Attributes"]
+        self.logger.debug(f"Response from DynamoDB: {response}")
 
-    def log_event(self, event):
+        if response["ResponseMetadata"]["HTTPStatusCode"] == HTTPStatus.OK:
+            return True
+        else:
+            return False
+        
+    def log_event(self, event:CloudEvent, resource:dict, resource_status:bool)->None:
         """
         Log the event
         """
-        s3_bucket = self.s3.Bucket(os.environ["EVENT_BUCKET_NAME"])
-        s3_key = f"{os.environ['EVENT_BUCKET_KEY_PREFIX']}_{event.get('id', uuid.uuid4())}.json"
+        s3_bucket = self.s3.Bucket("pg-poc-logging") # Remove hardcoded bucket name
+        bucket_prefix = f"{datetime.now().date().isoformat()}/{datetime.now().hour}"
+        s3_key = f"{s3_bucket}/{bucket_prefix}/{event.get('id', uuid.uuid4())}.json"
+
+        body = {
+            "metadata": {},
+            "event": json.dumps(to_json(event).decode("utf-8")),
+            "resource": json.dumps(resource),
+            "resource_created": str(resource_status)
+        }
 
         s3_bucket.put_object(
-            Body=json.dumps(event),
+            Body=json.dumps(body),
             Key=f"/{datetime.now().date()}/{s3_key}"
         )
 
-    def forward_event(self, event):
+    def forward_event(self, event, resource_id):
         """
         Forward the event to the next service
         """
         sqs = self.session.resource("sqs")
-        queue = sqs.get_queue_by_name(QueueName=os.environ["EVENT_QUEUE_NAME"])
+        queue = sqs.get_queue_by_name(QueueName="validator-queue")
 
-        cloud_event = CloudEvent().from_dict(event)
+        event_json = json.loads(to_json(event).decode("utf-8"))
+        event_data = event_json.pop("data", {})
+        event_attrs = event_json
+        event_attrs["resource_id"] = resource_id
+
+        cloud_event = CloudEvent(
+            event_attrs,
+            event_data
+        )
 
         try:
             response = queue.send_message(
-                MessageBody=to_binary(cloud_event),
-                MessageAttributes={},
-                MessageGroupId=cloud_event["type"],
-                MessageDeduplicationId=hashlib.md5(f"{cloud_event['id']}_{cloud_event['source']}_{cloud_event['time']}").hexdigest()
+                MessageBody=to_json(cloud_event).decode("utf-8"),
+                MessageAttributes={}
             )
+            logging.debug(f"Response from SQS: {response}")
+            logging.info(f"Event sent to validation SQS")
         except boto3.exceptions.botocore.exceptions.ClientError as e:
             self.logger.error(f"Error sending message to SQS: {e}")
-            self.logger.debug(f"Event: {cloud_event.to_dict()}")
+            self.logger.debug(f"Event: {cloud_event}")
             raise e
+        
+        return None
 
     def generate_response(
             self, 
@@ -180,17 +200,17 @@ class Ambassador:
         if status_code >= 299:
             attributes["type"] = "com.ambassador.event.error"
 
+        if resource:
+            data = resource
+
         if message:
             data = {
                 "error_message": message
             }
 
-        if resource:
-            data = resource
-
         cloud_event = CloudEvent(
             attributes=attributes,
-            data=resource
+            data=data
         )
 
         lambda_reply = {
@@ -198,7 +218,7 @@ class Ambassador:
                 "content-type": "application/json"
             },
             "statusCode": status_code,
-            "body":json.dumps(to_structured(cloud_event))
+            "body":to_json(cloud_event).decode("utf-8")
         }
 
         return lambda_reply
@@ -212,15 +232,16 @@ class Ambassador:
 
         # Authenticate the client
 
-        with self.authenticate(event["user_hash"], event["token"]) as auth:
-            if not auth["status"]:
-                self.logger.error("Unable to authenticate user")
-                self.logger.debug(f"Auth response: {auth}")
-                    
-                return self.generate_response(
-                    event["id"], 
-                    status_code=auth["status_code"].conjugate(), 
-                    message=auth["message"])
+        auth_response = self.authenticate(event["user_hash"], event["token"])
+
+        if not auth_response["status"]:
+            self.logger.error("Unable to authenticate user")
+            self.logger.debug(f"Auth response: {auth_response}")
+                
+            return self.generate_response(
+                event["id"], 
+                status_code=auth_response["http_status"].conjugate(), 
+                message=auth_response["message"])
         
         # Validate the event
         if not self.validate_event(event):
@@ -237,16 +258,23 @@ class Ambassador:
         response = self.register_resource(resource)
 
         # Log the event
-        self.log_event(event)
+        self.log_event(
+            event, 
+            resource, 
+            response
+        ) #TODO log the resource data as well.
 
         # Forward the event
-        response = self.forward_event(event)
+        response = self.forward_event(
+            event, resource["resource_id"])
 
         # Generate the response
         reply = self.generate_response(
             event["id"], 
-            resource=response, 
-            status_code=HTTPStatus.CREATED.conjugate())
+            resource=resource["resource_id"], 
+            status_code=HTTPStatus.CREATED.conjugate(),
+            transaction_id=event["transaction_id"]
+        )
 
         return reply
     
@@ -264,22 +292,61 @@ def lambda_handler(event, context):
     return Ambassador().main(event)  
 
 if __name__ == "__main__":
+    import time
+
+    session = boto3.session.Session()
+    dynamodb = session.client("dynamodb")
+
+    user_hash = hashlib.md5("test@test.com".encode("utf-8")).hexdigest()
+    token = f"{uuid.uuid4().hex[0:32]}.{uuid.uuid4().hex[0:32]}"
+    expiration = int((datetime.utcnow() + timedelta(hours=1)).timestamp())
+
+    dynamodb.update_item(
+        TableName="Users",
+        Key={
+            "user_hash": {
+                "S": user_hash
+            }
+        },
+        UpdateExpression="SET #token = :val1, #expiration_timestamp = :val2, #created = :val3",
+        ExpressionAttributeNames={
+            "#token": "token",
+            "#expiration_timestamp": "expiration_timestamp",
+            "#created": "created"
+        },        
+        ExpressionAttributeValues={
+            ":val1": {
+                "S": token
+            },
+            ":val2": {
+                "N": str(expiration)
+            },
+            ":val3": {
+                "N": str(int(datetime(2023, 7, 9).timestamp()))
+        }
+    })
+
+    time.sleep(5)
 
     attr = {
         "id": uuid.uuid4().hex,
         "type": "com.ambassador.event.request",
         "source": "https://ambassador.example.com",
-        "time": datetime.utcnow().isoformat(),
+        "time": str(datetime.utcnow().isoformat()),
         "specversion": "1.0",
         "datacontenttype": "application/json",
-        "user_hash": "1234567890",
-        "token": "1234567890",
-        "transaction_id": "1234567890"
+        "user_hash": user_hash,
+        "token": token,
+        "transaction_id": "1234567890",
+        "dataschema": "test_wall"
     }          
 
     data = {
-        "test": "test"
-    }
+        'id': 'bd9e7a2381564a2ca2ce36cc41b88a1c', 
+        'describes': 'wall', 
+        'subcomponents': {'dimensions': {'width': 10, 'height': 10, 'length': 10}
+            }
+        }
 
     event = CloudEvent(attributes=attr, data=data)
 

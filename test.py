@@ -16,6 +16,10 @@ schema = {
 data = {"name": "name", "abbr": "my name"}
 
 constructor = sdk.schema_factory(schema)
+builder = sdk.schema_constructor(schema)
+
+builder.add_property(name="new_property", schema={"type": "string"})
+print(builder.factory("mySchema")(new_property="value").schema)
 
 instance = constructor(**data)
 
@@ -55,7 +59,7 @@ with open("byte_encoded.txt","wb") as file:
 #response = sdk.Event.transmit(event=event)
 
 #print(response.json())
-
+"""
 attributes = {
         "type": "com.example.sampletype1",
         "content-type": "application/cloudevents-bulk+json",
@@ -207,4 +211,4 @@ response = requests.post(
     data=data
 )
 
-print(f"Response: {response.json()}")
+print(f"Response: {response.json()}")"""

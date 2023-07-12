@@ -8,9 +8,9 @@ import json
 from http import HTTPStatus
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.INFO)
+handler.setLevel(logging.DEBUG)
 handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s: %(message)s"))
 logger.addHandler(handler)
 
@@ -26,11 +26,17 @@ def get_user(user_hash:str=None)->dict:
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
     table = dynamodb.Table("Users") #TODO: Create this table in DynamoDB
 
+    now = datetime.utcnow()
+
     response = table.query(
-        KeyConditionExpression=Key("user_hash").eq(user_hash)
+        KeyConditionExpression=Key("user_hash").eq(user_hash),
+        ScanIndexForward=False,
+        Limit=1
     )
 
-    response.order_by("timestamp", ascending=False)
+    logger.debug(f"User query response: {response}")
+
+    #response.order_by("timestamp", ascending=False)
 
     if response.get("Count") == 0:
         logger.info(f"User {user_hash} not found.")
@@ -51,7 +57,7 @@ def validate_token(user_record:str=None, token:str=None)->dict:
         logger.info(f"User {user_record.get('user_hash')} provided an invalid token.")
         return {"status": False, "message": f"User {user_record.get('user_hash')} provided an invalid token."}
     
-    if user_record.get("token_expiration") < datetime.now():
+    if user_record.get("expiration_timestamp") < int(datetime.utcnow().timestamp()):
         logger.info(f"User {user_record.get('user_hash')} provided an expired token.")
         return {"status": False, "message": f"User {user_record.get('user_hash')} provided an expired token."}
     
@@ -71,10 +77,11 @@ def authorize_user(user_hash:str=None, token:str=None)->dict:
         }
     
     session = boto3.Session()
-    dynamodb = session.resource("dynamodb", region_name="us-east-1")
+    dynamodb = session.client("dynamodb", region_name="us-east-1")
+
     try:
         response = dynamodb.list_tables()
-        if "Users" not in response.get("TableNames"):
+        if "UserToken" not in response.get("TableNames"):
             logger.info("User table not found.")
             return {
                 "status": False,
@@ -124,7 +131,7 @@ def authorize_user(user_hash:str=None, token:str=None)->dict:
 
     if not validate_token(user_record=user_record.get("data"), token=token).get("status"):
         logger.info(f"Token validation failed for {user_hash}.")
-        logger.debug(f"User record: {json.dumps(user_record, indent=4)}")
+        logger.debug(f"User record: {user_record}")
         return {
             "status": False,
             "http_status": HTTPStatus.UNAUTHORIZED,
