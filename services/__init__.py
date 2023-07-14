@@ -1,1 +1,1 @@
-from .data_manager import EntityManager, SchemaManager
+from event_collector import Ambassador
