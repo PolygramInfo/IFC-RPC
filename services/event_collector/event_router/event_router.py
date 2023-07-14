@@ -14,7 +14,9 @@ def lambda_handler(event, context):
     sqs = sessions.client("sqs")
     event = from_dict(json.loads(event["body"]))
 
-    if event.get_attributes()["type"].split(".")[-1] == "com.example.sampletype1".split(".")[-1]:
+    event_type = event.get_attributes()["type"].split("/")[0]
+
+    if event_type == "com.pg.data":
         sqs.send_message(
             QueueUrl="https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue", #TODO Create a new queue for the data manager
             MessageBody=json.dumps(event.get_data()),
@@ -24,7 +26,7 @@ def lambda_handler(event, context):
                 "transaction_id": event.get_attributes()["transaction_id"],
             }
         )
-    if event.get_attributes()["type"].split(".")[-1] == "com.example.sampletype2".split(".")[-1]:
+    if event_type == "com.pg.schema":
         sqs.send_message(
             QueueUrl="https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue", #TODO Create a new queue for the schema manager
             MessageBody=json.dumps(event.get_data()),
