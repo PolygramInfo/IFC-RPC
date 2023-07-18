@@ -29,7 +29,7 @@ def validate_event(event:dict)->bool:
         schema = json.load(schema_file)
 
     try:
-        jsonschema.validate(json.loads(to_json(event).decode("utf-8")), schema)
+        jsonschema.validate(event, schema)
         return True
     except jsonschema.exceptions.ValidationError as err:
         logger.error(f"Unable to validate event: {err.message}")

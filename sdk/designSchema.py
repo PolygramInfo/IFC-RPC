@@ -1,15 +1,15 @@
-import schema_builder
+from .schema_builder import builder
 import uuid
 
-from metaSchema import generate_component, generate_entity
-from commonComponents import generate_dimensions
+from .metaSchema import generate_component, generate_entity
+from .commonComponents import generate_dimensions
 
 # Setup reusable pieces (i.e., meta schema etc.)
 component = generate_component()
 dimensions = generate_dimensions()
 
 def design_wall():
-    wallSchema = schema_builder.builder("design.Wall")\
+    wallSchema = builder("design.Wall")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -31,7 +31,7 @@ def design_wall():
     return wallSchema
 
 def design_roof():
-    roofSchema = schema_builder.builder("design.Roof")\
+    roofSchema = builder("design.Roof")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -52,7 +52,7 @@ def design_roof():
     return roofSchema    
 
 def design_floor():
-    floorSchema = schema_builder.builder("design.Floor")\
+    floorSchema = builder("design.Floor")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -73,7 +73,7 @@ def design_floor():
     return floorSchema    
 
 def design_window():
-    windowSchema = schema_builder.builder("design.Window")\
+    windowSchema = builder("design.Window")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -95,7 +95,7 @@ def design_window():
     return windowSchema  
 
 def design_door():
-    doorSchema = schema_builder.builder("design.Door")\
+    doorSchema = builder("design.Door")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -117,7 +117,7 @@ def design_door():
     return doorSchema  
 
 def design_material():
-    materialSchema = schema_builder.builder("design.Material")\
+    materialSchema = builder("design.Material")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -132,7 +132,7 @@ def design_material():
     return materialSchema
 
 def design_space():
-    spaceSchema = schema_builder.builder("design.Space")\
+    spaceSchema = builder("design.Space")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],

@@ -3,7 +3,7 @@ from cloudevents.conversion import to_dict
 
 import json
 
-class Event(CloudEvent):
+class Event:
 
     def set_attributes(
             self, 
@@ -11,7 +11,8 @@ class Event(CloudEvent):
             request_type, 
             userhash, 
             usertoken, 
-            transasction_id=None):
+            transasction_id=None,
+            **kwargs):
 
         self.attributes = {
             "type": f"com.pg.{service}/{request_type}",
@@ -22,13 +23,19 @@ class Event(CloudEvent):
             "transactionid": transasction_id,
             "datacontenttype": "application/json",
         }
+
+        self.attributes.update(kwargs)
     
         return self
 
-    def set_data(self, domain, schema_name, data):
-
+    def set_schema(self, domain, schema_name):
         self.attributes["dataschema"] = f"{domain}.{schema_name}"
-        self.data = data
+
+        return self
+    
+    def set_data(self, **kwargs):
+
+        self.data = kwargs if kwargs else {}
 
         return self
 
@@ -41,19 +48,17 @@ class Event(CloudEvent):
 
         return self
 
-    def serialize(self):
+    def serialize(self)->CloudEvent:
         self.event = CloudEvent(
             self.attributes,
             self.data
         )
 
-        return self
+        return self.event
     
     @staticmethod
     def deserialize(self, event:CloudEvent)->dict:
         return to_dict(event)
 
     def to_json(self):
-
         return json.dumps(to_dict(self.event))        
-

@@ -1,10 +1,10 @@
-import schema_builder
-import metaSchema
+from .schema_builder import builder
+from .metaSchema import generate_component
 import uuid
 
 def generate_dimensions():
-    component = metaSchema.generate_component()
-    dimensionSchema = schema_builder.builder("Dimensions")\
+    component = generate_component()
+    dimensionSchema = builder("Dimensions")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DimensionDef={"type":"number","description":"Value for a linear or metric dimension."}

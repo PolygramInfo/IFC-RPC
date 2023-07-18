@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import json
 
 import boto3
+from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 import botocore
 
 from cloudevents.http import CloudEvent
@@ -30,14 +32,16 @@ class SchemaManager:
             schema_name:str,
             schema:dict)->None:
 
+        Item = {
+            "domain": schema_domain,
+            "schema_name": schema_name,
+            "schema": schema
+        }
+
+        ts=TypeSerializer()
         response = self.dynamodb.put_item(
             TableName="SchemaRegistry",
-            Item={
-                "schema_domain": {"S": schema_domain},
-                "schema_name": {"S": schema_name},
-                "schema": {"M": schema}
-            },
-            ConditionExpression="attribute_not_exists(schema_id)",
+            Item=ts.serialize(Item)["M"] ,
             ReturnValues="ALL_OLD"
         )
 
@@ -48,39 +52,73 @@ class SchemaManager:
         schema = self.dynamodb.get_item(
             TableName="SchemaRegistry",
             Key={
-                "schema_domain": {"S": schema_domain},
+                "domain": {"S": schema_domain},
                 "schema_name": {"S": schema_name},
             })["Item"]
 
         return schema
     
+    def list(self, filter:str=None, get_schema:bool=False)->dict:
+        def deserialize_dynamo_item(item:dict)->dict:
+            ds = TypeDeserializer()
+            return {k:ds.deserialize(v) for k,v in item.items()}
+
+        self.logger.info(f"Running scan with filter: {filter}")
+
+        attributes_to_get = ["domain", "schema_name"]
+        if get_schema:
+            attributes_to_get.append("schema") 
+
+        schemata=[]
+        if filter:
+            response=self.dynamodb.scan(
+                TableName="SchemaRegistry",
+                FilterExpression=Key("domain").eq(filter),
+                AttributesToGet=attributes_to_get
+            )
+
+            self.logger.info(f"Got response: {len(response['Items'])} for filter: {filter}")
+            schemata = [deserialize_dynamo_item(r) for r in response["Items"]]
+            return schemata
+        
+        response=self.dynamodb.scan(
+            TableName="SchemaRegistry",
+            AttributesToGet=attributes_to_get
+        )
+
+        self.logger.info(f"Got response: {len(response['Items'])}")
+        schemata = [deserialize_dynamo_item(r) for r in response["Items"]]
+
+        return schemata
+    
 def lambda_handler(event, context):
 
     logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s: %(message)s"))
     handler.setLevel(logging.DEBUG)
     logger.addHandler(handler)
 
-    logger.info(f"Received event: {event}")
-
     schema_manager = SchemaManager()
 
     session = boto3.Session()
-    sqs = session.client("sqs")
-    queue_url = sqs.get_queue_url(QueueName="SchemaQueue")["QueueUrl"]
+    sqs = session.resource("sqs")
+    queue = sqs.get_queue_by_name(QueueName="schema-queue")
     s3 = session.client("s3")
-    dynamodb = session.client("dynamodb")
+    dynamodb = session.resource("dynamodb")
     table = dynamodb.Table("Resources")
 
-    event = sqs.receive_message(
-        QueueUrl=queue_url,
+    in_event = queue.receive_messages(
         MaxNumberOfMessages=1
     )
 
-    event = from_dict(CloudEvent, event)
+    logger.debug(f"Got messages: {len(in_event)}")
+    logger.debug(f"Got event: {in_event[0].body}")
 
-    if event.get_attributes()["type"] == "com.schema.create":
+    event = from_dict(CloudEvent,json.loads(in_event[0].body))
+
+    if event.get_attributes()["type"] == "com.pg.schema/create":
         logger.info(f"Creating schema: {event.get_data()}")
 
         response = schema_manager.create(
@@ -88,13 +126,25 @@ def lambda_handler(event, context):
             schema_name=event.get_data()["schema_name"],
             schema=event.get_data()["schema"]
         )
-    elif event.get_attributes()["type"] == "com.schema.read":
+        
+    elif event.get_attributes()["type"] == "com.pg.schema/read":
         logger.info(f"Reading schema: {event.get_data()['schema_domain']}.{event.get_data()['schema_name']}")
 
         response = schema_manager.read(
             schema_domain=event.get_data()["schema_domain"],
             schema_name=event.get_data()["schema_name"]
         )
+    elif event.get_attributes()["type"] == "com.pg.schema/list":
+        response = schema_manager.list(
+            filter=event.get_data().get("filter",None)
+        )
+        logger.info(f"Listing schemata")
+        logger.debug(f"Schema filter: {event.get_data().get('filter',None)}")
+    else:
+        response = {
+            "statusCode":500,
+            "message":"Invalid schema operation."
+        }
 
     logger.info(f"Response: {response}")
 
@@ -124,7 +174,7 @@ def lambda_handler(event, context):
     s3_response = s3.put_object(
         Bucket=bucket,
         Key=key,
-        Body=json.dumps(response["Item"])
+        Body=json.dumps(response.get("Item") if "Item" in response else response)
     )
 
     logger.info(f"S3 response: {s3_response}")
@@ -147,3 +197,21 @@ def lambda_handler(event, context):
             })
 
         raise Exception(f"Unable to upload resource: {s3_response}")
+    
+    queue.delete_messages(
+        Entries=[
+            {"Id": in_event[0].message_id, "ReceiptHandle": in_event[0].receipt_handle}
+        ]
+    )
+
+    return {
+        "statusCode": 200,
+        "Message": {
+            "s3_response": s3_response,
+            "dynamo_response": resource_response
+        }
+    }
+
+if __name__ == "__main__":
+
+    lambda_handler({},{})

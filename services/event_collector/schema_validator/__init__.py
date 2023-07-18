@@ -1,3 +1,3 @@
-from schema_validator import lambda_handler as validator
+from .validator import Validator
 
-__all__ = ["validator"]
+__all__ = ["Validator"]

@@ -1,15 +1,15 @@
-import schema_builder
+from .schema_builder import builder
 import uuid
 
-from metaSchema import generate_component, generate_entity
-from commonComponents import generate_dimensions
+from .metaSchema import generate_component, generate_entity
+from .commonComponents import generate_dimensions
 
 # Setup reusable pieces (i.e., meta schema etc.)
 component = generate_component()
 dimensions = generate_dimensions()
 
 def energy_wall():
-    wallSchema = schema_builder.builder("energy.Wall")\
+    wallSchema = builder("energy.Wall")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -31,7 +31,7 @@ def energy_wall():
     return wallSchema
 
 def energy_roof():
-    roofSchema = schema_builder.builder("energy.Roof")\
+    roofSchema = builder("energy.Roof")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -52,7 +52,7 @@ def energy_roof():
     return roofSchema    
 
 def energy_floor():
-    floorSchema = schema_builder.builder("energy.Floor")\
+    floorSchema = builder("energy.Floor")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -73,7 +73,7 @@ def energy_floor():
     return floorSchema    
 
 def energy_window():
-    windowSchema = schema_builder.builder("energy.Window")\
+    windowSchema = builder("energy.Window")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -94,7 +94,7 @@ def energy_window():
     return windowSchema  
 
 def energy_door():
-    doorSchema = schema_builder.builder("energy.Door")\
+    doorSchema = builder("energy.Door")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -115,9 +115,9 @@ def energy_door():
     return doorSchema   
 
 def generate_energyPlusMaterialNoMass():
-    matNoMass = schema_builder.builder("energy.energyPlusMaterialNoMass")\
+    matNoMass = builder("energy.energyPlusMaterialNoMass")\
     .add_properties(
-        name={"type":"string"}
+        name={"type":"string"},
         roughness={"type":"number"},
         thermalResistance={"type":"number"},
         thermalAbsorptance={"type":"number"},
@@ -131,7 +131,7 @@ def generate_energyPlusMaterialNoMass():
 def energy_material():
     noMasMat = generate_energyPlusMaterialNoMass()
 
-    materialSchema = schema_builder.builder("energy.Material")\
+    materialSchema = builder("energy.Material")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -153,26 +153,25 @@ def energy_material():
     return materialSchema       
    
 def generate_energyPlusWindowMaterialSimpleGlazing():
-    matSimpleGlazing = schema_builder.builder("energy.energyPlusWindowMaterialSimpleGlazing")\
+    matSimpleGlazing = builder("energy.energyPlusWindowMaterialSimpleGlazing")\
     .add_properties(
-        name={"type":"string"}
+        name={"type":"string"},
         uFactor={"type":"number"},
         solarHeatGianCoefficient={"type":"number"},
         visibleTransmittance={"type":"number"}
-  
     )\
     .add_required("name", "uFactor", "solarHeatGianCoefficient", "visibleTransmittance")
 
-    return matNoMass 
+    return matSimpleGlazing
 
 def energy_window_material():
     noMasWinMat = generate_energyPlusWindowMaterialSimpleGlazing()
 
-    winMaterialSchema = schema_builder.builder("energy.WindowMaterial")\
+    winMaterialSchema = builder("energy.WindowMaterial")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
-        NoMasWinMat=noMasMat.__dict__["schema"]
+        NoMasWinMaDef=noMasWinMat.__dict__["schema"]
     )\
     .add_properties(
         id={"$ref":"#/definitions/IDDefinition"},
@@ -189,9 +188,9 @@ def energy_window_material():
     return winMaterialSchema       
 
 def generate_energyPlusSpaceProgram():
-    energyPlusProgram = schema_builder.builder("energy.energyPlusSpaceProgram")\
+    energyPlusProgram = builder("energy.energyPlusSpaceProgram")\
     .add_properties(
-        name={"type":"string"}
+        name={"type":"string"},
         occupancy={"type":"number"},
         monSchedule={"type":"number"},
         tueSchedule={"type":"number"},
@@ -200,30 +199,30 @@ def generate_energyPlusSpaceProgram():
         friSchedule={"type":"number"},
         satSchedule={"type":"number"},
         sunSchedule={"type":"number"},      
-    )\
-    .add_required("name","occupancy", "monSchedule", "tueSchedule", "wenSchedule", "thuSchedule", "friSchedule", "satSchedule", "sunSchedule")
+    )
+    #.add_required("name","occupancy", "monSchedule", "tueSchedule", "wenSchedule", "thuSchedule", "friSchedule", "satSchedule", "sunSchedule")
 
     return energyPlusProgram     
 
 def generate_energyPlusHVAC():
-    energyPlusHVAC = schema_builder.builder("energy.energyPlusHVAC")\
+    energyPlusHVAC = builder("energy.energyPlusHVAC")\
     .add_properties(
-        name={"type":"string"}
+        name={"type":"string"},
         MaxHeatingSupplyAirTemp={"type":"number"},
         MaxCoolingSupplyAirTemp={"type":"number"},
         MaxHeatingSupplyAirHumRatio={"type":"number"},
         MaxCoolingSupplyAirHumRatio={"type":"number"},
         HeatingLimit={"type":"number"},
         CoolingLimit={"type":"number"}
-    )\
-    .add_required("name","MaxHeatingSupplyAirTemp", "MaxCoolingSupplyAirTemp", "MaxHeatingSupplyAirHumRatio", "MaxCoolingSupplyAirHumRatio", "HeatingLimit", "CoolingLimit")
+    )
+    #.add_required("name","MaxHeatingSupplyAirTemp", "MaxCoolingSupplyAirTemp", "MaxHeatingSupplyAirHumRatio", "MaxCoolingSupplyAirHumRatio", "HeatingLimit", "CoolingLimit")
 
     return energyPlusHVAC    
 
 def energy_space():
     energyPlusProgram = generate_energyPlusSpaceProgram()
     energyPlusHVAC = generate_energyPlusHVAC()
-    spaceSchema = schema_builder.builder("energy.Space")\
+    spaceSchema = builder("energy.Space")\
     .add_definitions(
         IDDefinition=component.__dict__["schema"]["definitions"]["IDDefinition"],
         DescribesDef=component.__dict__["schema"]["properties"]["describes"],
@@ -239,8 +238,10 @@ def energy_space():
                 "dimensions":{"$ref":"#/definitions/DimensionDef"},
                 "energyPlusProgram":{"$ref":"#/definitions/EnergyPlusProgramDef"},
                 "energyPlusHVAC":{"$ref":"#/definitions/EnergyPlusHVACDef"}
-            }
+            },
+            "required":["energyPlusProgram","energyPlusHVAC"]
         },
+        name={"type":"string", "description":"the friendly name of the zone."},
         volume={"type":"number", "description":"Indicates the volume of the space."},
         area={"type":"number", "description":"Indicates the area of the space."}
     )\

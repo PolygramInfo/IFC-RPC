@@ -149,8 +149,8 @@
       },
       "userhashdef": {
         "type": ["string", "null"],
-        "minLength": 32,
-        "pattern": "^[a-f0-9]{32}$"
+        "minLength": 64,
+        "pattern": "^[a-f0-9]{64}$"
       },
       "usertokendef": {
         "type": ["string", "null"],

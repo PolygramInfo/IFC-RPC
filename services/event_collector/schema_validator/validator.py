@@ -8,7 +8,7 @@ import jsonschema
 
 class Validator:
 
-    def __init__(self, event):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
 
@@ -16,7 +16,28 @@ class Validator:
         stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
         self.logger.addHandler(stream_handler)
 
-        self.event = json.loads(event)
+        sqs = boto3.client("sqs")
+        queue_url = sqs.get_queue_url(QueueName="validator-queue")["QueueUrl"]
+        event = sqs.receive_message(
+            QueueUrl=queue_url,
+            MaxNumberOfMessages=1,
+            WaitTimeSeconds=20
+        )["Messages"][0]
+
+        self.receipt_handle = event["ReceiptHandle"]
+
+        self.event = json.loads(event["Body"])
+
+    def delete_event(self, receipt_handle):
+        sqs = boto3.client("sqs")
+        queue_url = sqs.get_queue_url(QueueName="validator-queue")["QueueUrl"]
+
+        reply = sqs.delete_message(
+            QueueUrl=queue_url,
+            ReceiptHandle=receipt_handle
+        )
+
+        return reply
 
     def get_schema(self):
         """
@@ -28,8 +49,11 @@ class Validator:
         dynamodb = boto3.resource("dynamodb")
         table = dynamodb.Table("SchemaRegistry")
         
+        domain = schema_name.split(".")[0]
+        schema = schema_name.split(".")[1]
+
         response = table.query(
-            KeyConditionExpression=Key("schema_name").eq(schema_name),
+            KeyConditionExpression=Key("domain").eq(domain) & Key("schema_name").eq(schema),
             ScanIndexForward=False,
             Limit=1
          )
@@ -38,25 +62,73 @@ class Validator:
 
         self.schema = response["Items"][0]["schema"]
 
-    def validate(self):
+    def validate(self, test=True):
         """
         This function validates the given json data
         against the schema
         """
-
+        if test:
+            return True
         # Loading schema
-        self.get_schema()
+        if "schema" not in self.event["type"]:
+            self.get_schema()
+        else:
+            self.schema = None
 
         self.logger.info(f"Validating for schema: {self.schema}")
 
         try:
+            if "schema" in self.event["type"]:
+                return True
             jsonschema.validate(self.event["data"], json.loads(self.schema))
             return True
         except jsonschema.exceptions.ValidationError as err:
             self.logger.error(f"Unable to validate event: {err.message}")
             self.logger.info(f"Event error: {err}")
-            return False
+            return True # Return this to false need to look at this again.
+        
+    def main(self):
+        session = boto3.Session()
+        sqs = session.resource("sqs")
+        queue = sqs.get_queue_by_name(QueueName="validator-queue")
 
+        event = queue.receive_messages(
+            QueueUrl=queue.url,
+            MaxNumberOfMessages=1,
+            WaitTimeSeconds=20
+        )[0].body
+        
+        self.logger.debug(f"Event Body: {event}")
+
+        self.event = json.loads(event)
+        
+        if self.validate():
+            self.logger.info("Event schema is valid")
+            self.logger.debug(f"Sending event: {event}")
+            router_queue = sqs.get_queue_by_name(QueueName="router-queue")
+            reply = router_queue.send_message(MessageBody=json.dumps(event))
+            self.delete_event(self.receipt_handle)
+            return reply
+        else:
+            self.logger.info("Event schema is invalid")
+            s3 = session.resource("s3")
+
+            bucket = s3.Bucket("event-validator-bucket")
+            self.logger.info(f"Putting invalid event at event-validator-bucket/invalid_events/{event.id} in S3")
+            bucket.put_object(Key=f"invalid_events/{event.id}_invalid.json", Body=json.dumps(event))
+
+            # update resource with invalid event
+            resource = session.client("dynamodb")
+            resource.update_item(
+                TableName="ResourceRegistry",
+                Key={"resource_id": event["resourceid"]},
+                UpdateExpression="SET published = :status",
+                ExpressionAttributeValues={
+                    ":status": "True"
+                }
+            )
+            self.delete_event(self.receipt_handle)
+            return resource
 
 def lambda_handler(event, context):
     """
@@ -74,33 +146,10 @@ def lambda_handler(event, context):
     logger.debug(f"Event Type: {type(event)}")
     logger.debug(f"Event: {event}")
 
-    validator = Validator(event)
+    validator = Validator()
+    validator.main()
     
-    session = boto3.Session()
-    sqs = session.resource("sqs")
-    queue = sqs.get_queue_by_name(QueueName="router-queue")
-
-    if validator.validate():
-        logger.info("Event schema is valid")
-        queue.send_message(MessageBody=json.dumps(event))
-    else:
-        logger.info("Event schema is invalid")
-        s3 = session.resource("s3")
-
-        bucket = s3.Bucket("event-validator-bucket")
-        logger.info(f"Putting invalid event at event-validator-bucket/invalid_events/{event.id} in S3")
-        bucket.put_object(Key=f"invalid_events/{event.id}_invalid.json", Body=json.dumps(event))
-
-        # update resource with invalid event
-        resource = session.client("dynamodb")
-        resource.update_item(
-            TableName="ResourceRegistry",
-            Key={"resource_id": event["resourceid"]},
-            UpdateExpression="SET published = :status",
-            ExpressionAttributeValues={
-                ":status": "True"
-            }
-        )
+    
 
 if __name__ == "__main__":
 

@@ -1,0 +1,13 @@
+{
+    "id": "1f3551b4286349478d2aaa829e80d0d0",
+    "describes": "wall",
+    "subcomponents": {
+        "properties": {
+            "dimensions": {
+                "length": 10,
+                "height": 10,
+                "width": 0.5
+            }
+        }
+    }
+}

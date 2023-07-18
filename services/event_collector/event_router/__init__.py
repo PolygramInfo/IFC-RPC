@@ -1,3 +1,3 @@
-from event_router import lambda_handler as event_router
+from .router import Router
 
-__all__ = ["event_router"]
+__all__ = ["Routerr"]

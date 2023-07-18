@@ -10,11 +10,11 @@ from http import HTTPStatus
 
 import boto3
 from botocore import exceptions
-from cloudevents.conversion import to_binary, to_structured, to_json
+from cloudevents.conversion import to_binary, to_structured, to_json, from_dict
 from cloudevents.http import CloudEvent
 
-import event_authenticator
-import event_validator
+from .event_authenticator import get_user, validate_token, authorize_user
+from .event_validator import validate_event
 
 """
 The ambassador is the "frontdoor" to the client. 
@@ -82,7 +82,7 @@ class Ambassador:
         """
         Authenticate the client
         """
-        return event_authenticator.authorize_user(user_hash, token)
+        return authorize_user(user_hash, token)
     
     def validate_event(self, event):
         """
@@ -90,7 +90,7 @@ class Ambassador:
         does not check the data of the event, only the event is
         a valid event type and has the required fields.
         """
-        return event_validator.validate_event(event)
+        return validate_event(event)
     
     def generate_resource(self, event)->dict:
         """
@@ -141,7 +141,7 @@ class Ambassador:
 
         body = {
             "metadata": {},
-            "event": json.dumps(to_json(event).decode("utf-8")),
+            "event": json.dumps(event),
             "resource": json.dumps(resource),
             "resource_created": str(resource_status)
         }
@@ -158,15 +158,8 @@ class Ambassador:
         sqs = self.session.resource("sqs")
         queue = sqs.get_queue_by_name(QueueName="validator-queue")
 
-        event_json = json.loads(to_json(event).decode("utf-8"))
-        event_data = event_json.pop("data", {})
-        event_attrs = event_json
-        event_attrs["resource_id"] = resource_id
-
-        cloud_event = CloudEvent(
-            event_attrs,
-            event_data
-        )
+        event["resource_id"] = resource_id
+        cloud_event = from_dict(CloudEvent, event)
 
         try:
             response = queue.send_message(
@@ -193,8 +186,8 @@ class Ambassador:
         attributes = {
             "id": event_id,
             "type": "com.ambassador.event.response",
-            "source": os.environ["AMBASSADOR_URI"],
-            "transaction_id": transaction_id,
+            "source": "https://lambda.us-west-2.amazonaws.com/2015-03-31/functions/event_ambassador/invocations",
+            "transactionid": transaction_id,
         }
 
         if status_code >= 299:
@@ -232,7 +225,7 @@ class Ambassador:
 
         # Authenticate the client
 
-        auth_response = self.authenticate(event["user_hash"], event["token"])
+        auth_response = self.authenticate(event["userhash"], event["usertoken"])
 
         if not auth_response["status"]:
             self.logger.error("Unable to authenticate user")
@@ -271,9 +264,9 @@ class Ambassador:
         # Generate the response
         reply = self.generate_response(
             event["id"], 
-            resource=resource["resource_id"], 
+            resource=resource, 
             status_code=HTTPStatus.CREATED.conjugate(),
-            transaction_id=event["transaction_id"]
+            transaction_id=event["transactionid"]
         )
 
         return reply

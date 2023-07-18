@@ -1,0 +1,62 @@
+[
+    {
+        "id":"22f43e804c3c49fa80e61fb15416cc55",
+        "primitive_type":"MaterialAssembly",
+        "components":{
+            "relationships": {
+                "c33c9eab9b7f44d9b55bf4b5e04ed44d":{
+                    "relationship_type":"hasInstance",
+                    "edge_values":"5c789adccf2c49978afd8d0b26a46bd1"
+                },
+                "276513d7370746a58bcfb9ce84fd65a1":{
+                    "relationship_type":"hasInstance",
+                    "edge_values":"ac5c0310f5374f809ec5d02bd2544e20"
+                }
+            }
+        }
+    },
+    {
+        "id":"276513d7370746a58bcfb9ce84fd65a1",
+        "primitive_type":"Material",
+        "components":{
+            "design.Material":{
+                "id":"c2a244713fcc4f8f93dfe07b11c36979",
+                "describes":"material",
+                "other_properties":"..."
+            },
+            "energy.Material":{
+                "id":"4ab255fd28b94e52a7a4142d05200349",
+                "describes":"material",
+                "other_properties":"..."
+            }
+        }
+    },
+    {
+        "id":"c33c9eab9b7f44d9b55bf4b5e04ed44d",
+        "primitive_type":"Material",
+        "components":{
+            "design.Material": {
+                "id":"434bea07567a4079945cbe35b9dfeb8d",
+                "describes":"material",
+                "other_properties":"..."
+            },
+            "energy.Material": {
+                "id":"cc02ca9bb3284038b8f8cad76906ce51",
+                "describes":"material",
+                "other_properties":"..."
+            }
+        }
+    },
+    {
+        "id":"5c789adccf2c49978afd8d0b26a46bd1",
+        "describes":"data",
+        "layer_enumeration":"1",
+        "thickness":"0.2"
+    },
+    {
+        "id":"ac5c0310f5374f809ec5d02bd2544e20",
+        "describes":"data",
+        "layer_enumeration":"2",
+        "thickness":"0.2"
+    }
+]

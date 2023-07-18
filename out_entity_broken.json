@@ -1,0 +1,51 @@
+{
+    "components": {
+        "energy.Geometry": {
+            "serialized_geometry": {
+                "version": 10000, 
+                "archive3dm": 70, 
+                "data": "+n8CAOU4AAAAAAAA+/...", 
+                "opennurbs": -1904441731
+            }, 
+            "content_type": "application/opennubs+json", 
+            "id": "20fe90effa9c47298403c7e94c9f8237"
+        }, 
+        "energy.Space": {
+            "program": "Residential", 
+            "area": 182.27777777777783, 
+            "volume": 1822.7777777777778, 
+            "name": "MainZone", 
+            "subcomponents": {
+                "properties": {
+                    "energyPlusProgram": {
+                        "occupancy": "2", 
+                        "monSchedule": 0.5, 
+                        "thuSchedule": 0.5, 
+                        "satSchedule": 0.5, 
+                        "wedSchedule": 0.5, 
+                        "friSchedule": 0.5, 
+                        "sunSchedule": 0.5, 
+                        "tueSchedule": 0.5
+                    }, 
+                    "dimensions": {
+                        "height": 10.0, 
+                        "length": 12.993861185489223, 
+                        "width": 40.643572560970313
+                    }
+                }
+            }, 
+            "id": "c34d6b571696419dbb052e553661211a"
+        }, 
+        "meta.Relationships": {
+            "id":"e3d76c729243412ca77b54e4b2e89057",
+            "e18ce93500bb43e796e80417ab92f614": {
+                "relationship_type": "Contains"
+            }, 
+            "9c48dd708cb44e27a4fa6ddb66e5e6ee": {
+                "relationship_type": "Contains"
+            }
+        }
+    }, 
+    "primitive_type": "space", 
+    "id": "6b71bfb7305b40a297c31175573feebe"
+}

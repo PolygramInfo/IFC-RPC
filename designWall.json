@@ -1,0 +1,69 @@
+{
+    "title": "design.Wall",
+    "schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "id": {
+            "$ref": "#/definitions/IDDefinition"
+        },
+        "describes": {
+            "$ref": "#/definitions/DescribesDef",
+            "default": "wall"
+        },
+        "subcomponents": {
+            "title": "Subcomponents",
+            "properties": {
+                "dimensions": {
+                    "$ref": "#/definitions/DimensionDef"
+                }
+            }
+        },
+        "exterior": {
+            "type": "boolean",
+            "description": "Indicates if a wall is exterior facing.",
+            "default": true
+        }
+    },
+    "additionalProperties": true,
+    "definitions": {
+        "IDDefinition": {
+            "type": "string",
+            "description": "Component identifier, should be a 36 character UUID or hex hashed UUID."
+        },
+        "DescribesDef": {
+            "type": "string",
+            "description": "Type of entities described by this component schema",
+            "enum": [
+                "wall",
+                "floor"
+            ]
+        },
+        "DimensionDef": {
+            "title": "Dimensions",
+            "schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+                "length": {
+                    "$ref": "#/definitions/DimensionDef"
+                },
+                "width": {
+                    "$ref": "#/definitions/DimensionDef"
+                },
+                "height": {
+                    "$ref": "#/definitions/DimensionDef"
+                }
+            },
+            "additionalProperties": false,
+            "definitions": {
+                "IDDefinition": {
+                    "type": "string",
+                    "description": "Component identifier, should be a 36 character UUID or hex hashed UUID."
+                },
+                "DimensionDef": {
+                    "type": "number",
+                    "description": "Value for a linear or metric dimension."
+                }
+            }
+        }
+    }
+}

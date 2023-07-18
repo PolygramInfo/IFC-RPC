@@ -3,8 +3,10 @@ import sys
 import uuid
 from dataclasses import dataclass
 import json
+from decimal import Decimal
 
 import boto3
+from boto3.dynamodb.types import TypeSerializer, TypeDeserializer
 import botocore
 
 from cloudevents.http import CloudEvent
@@ -25,43 +27,59 @@ class EntityManager:
             self.logger.error(f"Unable to connect to DynamoDB: {err}")
             raise err
 
-    def create(self, primitive_type:str=None)->None:
+    def create(self, id:str, primitive_type:str=None)->None:
 
         response = self.dynamodb.put_item(
             TableName="EntityRegistry",
             Item={
                 "primitive_type": {"S": primitive_type if primitive_type else ""},
-                "entity_id": {"S":uuid.uuid4().hex}
+                "entity_id": {"S":id}
             },
-            ConditionExpression="attribute_not_exists(entity_id)",
             ReturnValues="ALL_OLD"
         )
 
         return response
 
-    def read(self, entity_id:dict, filter:str=None)->dict:
+    def read(self, entity_id:str, filter:str=None)->dict:
         """
         Return an entity and all of its components.
         """
+        self.logger.debug(f"Running read for {entity_id}")
 
+        ds = TypeDeserializer()
         response = self.dynamodb.get_item(
             TableName="EntityRegistry",
             Key={
-                "entity_id": entity_id
+                "primitive_type": {"S":"wall"},
+                "entity_id": {"S": entity_id}
             })["Item"]
+        self.logger.debug(f"Got Item:\n {response}")
+
+        response = {k: ds.deserialize(v) for k,v in response.items()}
         
-        components = self.dynamodb.scan(
+        self.logger.debug(f"Deserialized Object:\n {response}")
+
+        temp = self.dynamodb.scan(
             TableName="ComponentRegistry",
             FilterExpression="contains(#entities, :entity_id)",
             ExpressionAttributeNames={
                 "#entities": "entities"
             },
             ExpressionAttributeValues={
-                ":entity_id": entity_id
+                ":entity_id": {"S": entity_id}
             })["Items"]
         
+        self.logger.debug(f"Component Response: {temp}")
+
+        components = []
+        for component in temp:
+            self.logger.debug(f"Deserializing {component}")
+            component = {k: ds.deserialize(v) for k,v in component.items()}
+            self.logger.debug(f"Deserialized Component:\n {component}")
+            components.append(component)
+
         if filter:
-            components = [component for component in components if component["component_type"] == filter]
+            components = [component for component in components if component["component_type"].split(".")[0] == filter]
 
         response["components"] = components
         
@@ -80,21 +98,22 @@ class EntityManager:
     def register_component(
             self, 
             entity_id:str, 
-            component_id:str, 
-            component_data:dict
+            component_id:str,
+            component_type:str
         )->dict:
 
         self.dynamodb.update_item(
             TableName="ComponentRegistry",
             Key={
-                "component_id": entity_id
+                "component_id": {"S": component_id},
+                "component_type": {"S": component_type}
             },
-            UpdateExpression="ADD #entities :entity_id",
+            UpdateExpression="SET #entities=list_append(#entities, :entity_id)",
             ExpressionAttributeNames={
                 "#entities": "entities"
             },
             ExpressionAttributeValues={
-                ":entity_id": {"SS": [entity_id]}
+                ":entity_id": {"L":[{"S": entity_id}]}
             })
 
     def relate_entities(
@@ -145,24 +164,21 @@ class ComponentManager:
             self,
             component_id:str,
             component_type:str,
-            component_data:dict
+            component_data:dict,
+            entity_id:str=None
         )->dict:
-        
-        event = from_dict(CloudEvent, event)
 
-        id = event.get_data()["id"]
-        data = event.get_data()["data"]
-        data.pop("id")
+        ts = TypeSerializer()
+        Item = {
+            "component_id": component_id,
+            "component_type": component_type,
+            "entities":[entity_id] if entity_id else [],
+            "component_data": component_data
+        }
 
         response = self.dynamodb.put_item(
             TableName="ComponentRegistry",
-            Item={
-                "component_id": {"S": event.get_data()["id"]},
-                "entities": {"SS": []},
-                "component_type": {"S": event.get_attributes()["dataschema"]},
-                "component_data": {"M": event["component_data"]}
-            },
-            ConditionExpression="attribute_not_exists(component_id)",
+            Item=ts.serialize(Item)["M"],
             ReturnValues="ALL_OLD"
         )
 
@@ -170,62 +186,91 @@ class ComponentManager:
     
     def read(self, component_id:str)->dict:
 
-        component = self.dynamodb.get_item(
-            TableName="ComponentRegistry",
-            Key={
-                "component_id": {"S": component_id}
-            })["Item"]
+        ds = TypeDeserializer()
 
-        return component
+        component = self.dynamodb.query(
+            TableName="ComponentRegistry",
+            KeyConditionExpression="component_id = :component_id",
+            ExpressionAttributeValues={
+                ":component_id": {"S": component_id}
+            })["Items"][0]
+        
+        return {k: ds.deserialize(v) for k,v in component.items()}
+    
+
+class JSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return json.JSONEncoder.default(self, obj)
 
 def lambda_hander(event, context):
     """
     This function is the entry point for the lambda function.
     """
     logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s: %(message)s"))
     handler.setLevel(logging.DEBUG)
     logger.addHandler(handler)
 
+    #boto3.set_stream_logger('', level=logging.DEBUG)
     session = boto3.Session()
+    sqs = session.resource("sqs")
     s3 = session.client("s3")
     dynamodb = session.resource("dynamodb")
     table = dynamodb.Table("Resources")
+    
+    queue = sqs.get_queue_by_name(QueueName="data-queue")
+    raw_event = queue.receive_messages(
+        MaxNumberOfMessages=1
+    )
 
+    if not len(raw_event):
+        logger.info("No messages in queue.")
+        return {"message":"No messages in queue."}
+
+    logger.debug(f"Raw Event: {raw_event[0].body}")
+
+    receipt_handle = raw_event[0].receipt_handle
     event = from_dict(
         event_type=CloudEvent,
-        event=json.loads(json.loads(event)["Body"])
+        event=json.loads(raw_event[0].body, parse_float=Decimal)
     )
 
     entity_manager = EntityManager()
     component_manager = ComponentManager()
 
-    action = event["type"].split("/")[-1]
-    if action == "entity.create":
-        response = entity_manager.create(event.get_data()["primitive_type"])
+    action = event["type"]
+    if action == "com.pg.entity/create":
+        response = entity_manager.create(event.get_data()["id"], event.get_data()["primitive_type"])
         
         if event.get_data().get("components", None):
-            for component, component_name in event.get_data()["components"].items():
+            for component_name, component in event.get_data()["components"].items():
+                logger.debug(f"Loading Component:\n {component}")
                 component_id = component.get("id", uuid.uuid4().hex)
                 try:
-                    component_manager.create(
+                    component_response = component_manager.create(
                         component_id=component_id,
                         component_type=component_name,
-                        component_data=component["data"]
+                        component_data=component,
+                        entity_id=event.get_data().get("id",None)
                     )
                 except KeyError as err:
                     logger.error(f"Unable to create component: {err}")
                     raise err
                 
                 entity_manager.register_component(
-                    entity_id=response["Attributes"]["entity_id"],
-                    component_id=component_id
+                    entity_id=event.get_data()["id"],
+                    component_id=component_id,
+                    component_type=component_name
                 )
-                    
-    elif action == "entity.get":
-        entity_manager.read(event["entity_id"], event.get_data().get("filter", None))
-    elif action == "entity.register":
+
+                response.update({component_name:component_response})
+    elif action == "com.pg.entity/read":
+        response = entity_manager.read(event.get_data()["id"], event.get_data().get("filter", None))
+    elif action == "com.pg.entity/registerComponent":
         if len(event.get("data",{}).get("components", {})) > 0:
             for component in event.get_data()["components"]:
                 entity_manager.register_component(
@@ -235,7 +280,7 @@ def lambda_hander(event, context):
             entity_manager.register_component(
                 entity_id=event.get_data()["entity_id"],
                 component_id=event.get_data()["component_id"])
-    elif action == "entity.relate":
+    elif action == "com.pg.entity/relate":
         response = entity_manager.relate_entities(
             event["subject"], 
             event["object"],
@@ -243,17 +288,21 @@ def lambda_hander(event, context):
             event["component_id"])
     elif action == "entity.delete":
         entity_manager.delete(event["entity_id"])
-    elif action == "component.create":
+    elif action == "com.pg.entity/componentCreate":
         response = component_manager.create(
             component_id=event.get_data()["id"],
             component_type=event.get_attributes()["dataschema"],
             component_data=event.get_data()["data"]
         )
+    elif action == "com.pg.entity/componentRead":
+        response = component_manager.read(event.get_data()["id"])
     else:
         raise Exception(f"Invalid event type: {event['type']}")
 
     bucket = "pg-resource-registery"
     key = f"resources/{event['resource_id']}.json"
+
+    self.logger.debug(f"Updating resource: {event.get_attributes()['resource_id']}")
 
     resource_response = table.update_item(
         Key={
@@ -270,17 +319,24 @@ def lambda_hander(event, context):
             ":resource_url": f"s3://{bucket}/{key}"
         })
 
-    if resource_response["ResponseMetadata"]["HTTPStatusCode"] != 200:
-        raise Exception(f"Unable to update resource: {resource_response}")
+    queue.delete_messages(
+        Entries=[
+            {"Id": raw_event[0].message_id, "ReceiptHandle": raw_event[0].receipt_handle}
+        ]
+    )
 
-    
+    if resource_response["ResponseMetadata"]["HTTPStatusCode"] != 200:
+        raise Exception(f"Unable to update resource: {resource_response}")    
+
+    logger.debug(f"Response:\n {response}")
 
     s3_put = s3.put_object(
         Bucket=bucket,
         Key=key,
-        Body=json.dumps(response)
+        Body=json.dumps(response, indent=4, cls=JSONEncoder)
     )
 
+    logger.info(f"Writing resource {event.get_attributes()['resource_id']} to {bucket}/{key}.json")
     if s3_put["ResponseMetadata"]["HTTPStatusCode"] != 200:
         table.update_item(
             Key={
@@ -306,26 +362,4 @@ def lambda_hander(event, context):
 
 if __name__ == "__main__":
 
-    logger = logging.getLogger(__name__)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s: %(message)s"))
-    handler.setLevel(logging.DEBUG)
-    logger.addHandler(handler)
-
-    handler = logging.FileHandler("EntityManager.test.log")
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s: %(message)s"))
-    handler.setLevel(logging.DEBUG)
-
-    logger.addHandler(handler)
-
-    sqs = boto3.client("sqs")
-    queue_url = sqs.get_queue_by_name(QueueName="EntityManagerQueue")
-
-    message = sqs.receive_message(
-        QueueUrl=queue_url,
-        MaxNumberOfMessages=1,
-        WaitTimeSeconds=20
-    )["Messages"][0]
-
-    response = lambda_hander(json.dumps(message), None)
-    print(response)
+    lambda_hander({}, {})
